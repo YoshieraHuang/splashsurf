@@ -30,14 +30,11 @@ pub fn neighborhood_search_naive(c: &mut Criterion) {
     group.warm_up_time(Duration::from_secs(3));
     group.measurement_time(Duration::from_secs(10));
 
-    let mut neighborhood_lists = Vec::with_capacity(particle_positions.len());
     group.bench_function("neighborhood_search_naive", move |b| {
         b.iter(|| {
-            neighborhood_lists.clear();
             neighborhood_search::neighborhood_search_naive(
                 &particle_positions,
                 COMPACT_SUPPORT_RADIUS as f32,
-                &mut neighborhood_lists,
             );
         })
     });

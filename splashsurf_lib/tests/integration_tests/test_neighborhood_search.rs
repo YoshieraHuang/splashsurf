@@ -81,8 +81,7 @@ fn test_neighborhood_search_naive_simple() {
     let search_radius: f32 = 0.3;
 
     for (particles, mut solution) in generate_simple_test_cases(search_radius) {
-        let mut nl = Vec::new();
-        neighborhood_search_naive(particles.as_slice(), search_radius, &mut nl);
+        let mut nl = neighborhood_search_naive(particles.as_slice(), search_radius);
 
         sort_neighborhood_lists(&mut nl);
         sort_neighborhood_lists(&mut solution);
@@ -137,11 +136,10 @@ mod tests_from_files {
         let domain =
             AxisAlignedBoundingBox3d::par_from_points(particles.as_slice()).scale_uniformly(1.5);
 
-        let mut nl_naive = Vec::new();
         let mut nl_hashed = Vec::new();
         let mut nl_hashed_par = Vec::new();
 
-        neighborhood_search_naive(particles.as_slice(), search_radius, &mut nl_naive);
+        let mut nl_naive = neighborhood_search_naive(particles.as_slice(), search_radius);
         neighborhood_search_spatial_hashing::<i64, f32>(
             &domain,
             particles.as_slice(),
@@ -174,11 +172,10 @@ mod tests_from_files {
         let domain =
             AxisAlignedBoundingBox3d::par_from_points(particles.as_slice()).scale_uniformly(1.5);
 
-        let mut nl_naive = Vec::new();
         let mut nl_hashed = Vec::new();
         let mut nl_hashed_par = Vec::new();
 
-        neighborhood_search_naive(particles.as_slice(), search_radius, &mut nl_naive);
+        let mut nl_naive = neighborhood_search_naive(particles.as_slice(), search_radius);
         neighborhood_search_spatial_hashing::<i64, f32>(
             &domain,
             particles.as_slice(),
@@ -211,11 +208,10 @@ mod tests_from_files {
         let domain =
             AxisAlignedBoundingBox3d::par_from_points(particles.as_slice()).scale_uniformly(1.5);
 
-        let mut nl_naive = Vec::new();
         let mut nl_hashed = Vec::new();
         let mut nl_hashed_par = Vec::new();
 
-        neighborhood_search_naive(particles.as_slice(), search_radius, &mut nl_naive);
+        let mut nl_naive = neighborhood_search_naive(particles.as_slice(), search_radius);
         neighborhood_search_spatial_hashing::<i64, f32>(
             &domain,
             particles.as_slice(),

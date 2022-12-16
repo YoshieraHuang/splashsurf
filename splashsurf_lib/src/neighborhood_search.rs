@@ -74,22 +74,27 @@ pub fn search_inplace<I: Index, R: Real>(
 pub fn neighborhood_search_naive<R: Real>(
     particle_positions: &[Vector3<R>],
     search_radius: R,
-    neighborhood_list: &mut Vec<Vec<usize>>,
-) {
+    // neighborhood_list: &mut Vec<Vec<usize>>,
+) -> Vec<Vec<usize>> {
     profile!("neighborhood_search_naive");
 
-    init_neighborhood_list(neighborhood_list, particle_positions.len());
+    // init_neighborhood_list(neighborhood_list, particle_positions.len());
     let search_radius_squared = search_radius * search_radius;
 
-    for (idx_i, pos_i) in particle_positions.iter().enumerate() {
-        let neighbors_i = neighborhood_list.get_mut(idx_i).unwrap();
-        for (idx_j, pos_j) in particle_positions.iter().enumerate() {
-            let is_neighbor = (pos_j - pos_i).norm_squared() <= search_radius_squared;
-            if is_neighbor && idx_j != idx_i {
-                neighbors_i.push(idx_j);
-            }
-        }
-    }
+    particle_positions
+        .iter()
+        .enumerate()
+        .map(|(idx_i, pos_i)| {
+            particle_positions
+                .iter()
+                .enumerate()
+                .filter(|(idx_j, pos_j)| {
+                    (*idx_j != idx_i) && (*pos_j - pos_i).norm_squared() <= search_radius_squared
+                })
+                .map(|(idx_j, _)| idx_j)
+                .collect()
+        })
+        .collect()
 }
 
 /// Allocates enough storage for the given number of particles and clears all existing neighborhood lists
@@ -121,7 +126,6 @@ fn par_init_neighborhood_list(neighborhood_list: &mut Vec<Vec<usize>>, new_len: 
 }
 
 /// Performs a neighborhood search, returning the indices of all neighboring particles in the given search radius per particle, sequential implementation
-#[inline(never)]
 pub fn neighborhood_search_spatial_hashing<I: Index, R: Real>(
     domain: &AxisAlignedBoundingBox3d<R>,
     particle_positions: &[Vector3<R>],
@@ -158,52 +162,39 @@ pub fn neighborhood_search_spatial_hashing<I: Index, R: Real>(
     init_neighborhood_list(neighborhood_list, particle_positions.len());
     {
         profile!("calculate_particle_neighbors_seq");
-        let mut potential_neighbor_particle_vecs = Vec::new();
+        // let mut potential_neighbor_particle_vecs = Vec::new();
         for (&flat_cell_index, particles) in &particles_per_cell {
             let current_cell = grid.try_unflatten_cell_index(flat_cell_index).unwrap();
 
             // Collect references to the particle lists of all existing adjacent cells and the cell itself
-            potential_neighbor_particle_vecs.clear();
-            potential_neighbor_particle_vecs.extend(
-                grid.cells_adjacent_to_cell(&current_cell)
-                    .chain(std::iter::once(current_cell))
-                    .filter_map(|c| {
-                        let flat_cell_index = grid.flatten_cell_index(&c);
-                        particles_per_cell.get(&flat_cell_index)
-                    }),
-            );
+            // potential_neighbor_particle_vecs.clear();
+            let potential_neighbor_particle_vecs = grid
+                .cells_adjacent_to_cell(&current_cell)
+                .chain(std::iter::once(current_cell))
+                .filter_map(|c| {
+                    let flat_cell_index = grid.flatten_cell_index(&c);
+                    particles_per_cell.get(&flat_cell_index)
+                })
+                .collect::<Vec<_>>();
 
-            // Returns an iterator over all particles of all adjacent cells and the cell itself
-            let potential_neighbor_particle_iter = || {
-                potential_neighbor_particle_vecs
-                    .iter()
-                    .flat_map(|v| v.iter())
-            };
-
-            // Iterate over all particles of the current cell
-            for &particle_i in particles {
-                let pos_i = &particle_positions[particle_i];
-                let particle_i_neighbors = &mut neighborhood_list[particle_i];
-
-                // Check for neighborhood with all neighboring cells
-                for &particle_j in potential_neighbor_particle_iter() {
-                    if particle_i == particle_j {
-                        continue;
-                    }
-
-                    let pos_j = &particle_positions[particle_j];
-                    if (pos_j - pos_i).norm_squared() < search_radius_squared {
-                        // A neighbor was found
-                        particle_i_neighbors.push(particle_j);
-                    }
-                }
-            }
+            particles.iter().for_each(|particle_i| {
+                let pos_i = &particle_positions[*particle_i];
+                neighborhood_list[*particle_i].extend(
+                    potential_neighbor_particle_vecs
+                        .iter()
+                        .flat_map(|v| v.iter())
+                        .filter(|&particle_j| particle_j != particle_i)
+                        .filter(|&particle_j| {
+                            let pos_j = &particle_positions[*particle_j];
+                            (pos_j - pos_i).norm_squared() < search_radius_squared
+                        }),
+                );
+            });
         }
     }
 }
 
 /// Performs a neighborhood search, returning the indices of all neighboring particles in the given search radius per particle, multi-threaded implementation
-#[inline(never)]
 pub fn neighborhood_search_spatial_hashing_parallel<I: Index, R: Real>(
     domain: &AxisAlignedBoundingBox3d<R>,
     particle_positions: &[Vector3<R>],
@@ -293,39 +284,40 @@ pub fn neighborhood_search_spatial_hashing_parallel<I: Index, R: Real>(
                     // Check for neighborhood with particles of all adjacent cells
                     // Transitive neighborhood relationship is not handled explicitly.
                     // Instead, it will be handled when the cell of `particle_j` is processed.
-                    for &adjacent_cell_particles in cell_k_adjacent_particle_vecs.iter() {
-                        for &particle_j in adjacent_cell_particles.iter() {
-                            let pos_j = &particle_positions[particle_j];
-                            // TODO: We might not be able to guarantee that this is symmetric.
-                            //  Therefore, it might be possible that only one side of some neighborhood relationships gets detected.
-                            if (pos_j - pos_i).norm_squared() < search_radius_squared {
-                                // A neighbor was found
-                                particle_i_neighbors.push(particle_j);
-                            }
-                        }
-                    }
+                    particle_i_neighbors.extend(cell_k_adjacent_particle_vecs.iter().flat_map(
+                        |&adjacent_cell_particles| {
+                            adjacent_cell_particles.iter().filter(|&particle_j| {
+                                let pos_j = &particle_positions[*particle_j];
+                                (pos_j - pos_i).norm_squared() < search_radius_squared
+                            })
+                        },
+                    ));
 
                     // Check for neighborhood with all remaining particles of the same cell
-                    for &particle_j in cell_k_particles.iter().skip(i + 1) {
-                        let pos_j = &particle_positions[particle_j];
-                        if (pos_j - pos_i).norm_squared() < search_radius_squared {
+                    cell_k_particles
+                        .iter()
+                        .skip(i + 1)
+                        .filter(|&particle_j| {
+                            let pos_j = &particle_positions[*particle_j];
+                            (pos_j - pos_i).norm_squared() <= search_radius_squared
+                        })
+                        .for_each(|&particle_j| {
                             // A neighbor was found
                             particle_i_neighbors.push(particle_j);
 
-                            // Get mutable reference to neighborhood list of `particle_j`
-                            // SAFETY: This is sound because
-                            //  1. The same reasons why we can get a mutable reference to the neighborhood list of `particle_i` (see above).
-                            //  2. We only access neighborhood lists of particles with j > i, so we have no aliasing with i.
-                            // => We only dereference and write to strictly disjoint regions in memory
                             {
+                                // Get mutable reference to neighborhood list of `particle_j`
+                                // SAFETY: This is sound because
+                                //  1. The same reasons why we can get a mutable reference to the neighborhood list of `particle_i` (see above).
+                                //  2. We only access neighborhood lists of particles with j > i, so we have no aliasing with i.
+                                // => We only dereference and write to strictly disjoint regions in memory
                                 let particle_j_neighbors = unsafe {
                                     neighborhood_list_mut_ptr.get_mut_unchecked(particle_j)
                                 };
                                 // Add neighborhood relationship transitively
                                 particle_j_neighbors.push(particle_i);
                             }
-                        }
-                    }
+                        });
                 }
             },
         );
@@ -335,7 +327,8 @@ pub fn neighborhood_search_spatial_hashing_parallel<I: Index, R: Real>(
 /// Stats of a neighborhood list
 #[derive(Clone, Debug)]
 pub struct NeighborhoodStats {
-    /// A histogram over the count of particle neighbors per particle (e.g. `histogram[0]` -> count of particles without neighbors, `histogram[1]` -> count of particles with one neighbor, etc.)
+    /// A histogram over the count of particle neighbors per particle
+    /// (e.g. `histogram[0]` -> count of particles without neighbors, `histogram[1]` -> count of particles with one neighbor, etc.)
     pub histogram: Vec<usize>,
     /// Number of particles that have neighbors
     pub particles_with_neighbors: usize,
@@ -369,19 +362,6 @@ pub fn compute_neigborhood_stats(neighborhood_list: &Vec<Vec<usize>>) -> Neighbo
 
     let avg_neighbors = total_neighbors as f64 / particles_with_neighbors as f64;
 
-    /*
-    println!(
-        "Max neighbors: {}, Avg neighbors: {:.3}, particles with neighbors: {:.3}%",
-        max_neighbors,
-        avg_neighbors,
-        (nonzero_neighborhoods as f64 / particle_positions.len() as f64) * 100.0
-    );
-    println!("Histogram:");
-    for (i, &count) in neighbor_histogram.iter().enumerate() {
-        println!("{:2} neighbors: {:10}", i, count);
-    }
-     */
-
     NeighborhoodStats {
         histogram: neighbor_histogram,
         particles_with_neighbors,
@@ -391,7 +371,6 @@ pub fn compute_neigborhood_stats(neighborhood_list: &Vec<Vec<usize>>) -> Neighbo
 }
 
 // Generates a map for spatially hashed indices of all particles (map from cell -> enclosed particles)
-#[inline(never)]
 fn sequential_generate_cell_to_particle_map<I: Index, R: Real>(
     grid: &UniformGrid<I, R>,
     particle_positions: &[Vector3<R>],
@@ -419,7 +398,6 @@ fn sequential_generate_cell_to_particle_map<I: Index, R: Real>(
     particles_per_cell
 }
 
-#[inline(never)]
 fn parallel_generate_cell_to_particle_map<I: Index, R: Real>(
     grid: &UniformGrid<I, R>,
     particle_positions: &[Vector3<R>],
