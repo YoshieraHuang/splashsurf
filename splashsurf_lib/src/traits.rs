@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
+use std::iter::Sum;
 
 use bitflags::_core::ops::{AddAssign, MulAssign, SubAssign};
 use bytemuck::Pod;
@@ -60,6 +61,7 @@ pub trait Real:
         + Default
         + Pod
         + ThreadSafe
+        + Sum
 {
     /// Tries to convert this value to another [`Real`] type `T` by converting first to `f64` followed by `T::from_f64`. If the value cannot be represented by the target type, `None` is returned.
     fn try_convert<T: Real>(self) -> Option<T> {
@@ -131,6 +133,7 @@ impl<
             + Default
             + Pod
             + ThreadSafe
+            + Sum
             + 'static,
     > Real for T
 {

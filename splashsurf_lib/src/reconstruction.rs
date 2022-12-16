@@ -611,7 +611,7 @@ pub(crate) fn compute_particle_densities_and_neighbors<I: Index, R: Real>(
     );
 
     trace!("Computing particle densities...");
-    density_map::compute_particle_densities_inplace::<I, R>(
+    density_map::compute_particle_densities_inplace(
         particle_positions,
         particle_neighbor_lists.as_slice(),
         parameters.compact_support_radius,
